@@ -86,7 +86,7 @@ export default function Form() {
         </h2>
 
         <p style={{ color: "#94a3b8", marginBottom: "20px" }}>
-          Fill in your details and we'll send a custom task to your email.
+          Fill in your details and we'll send a personalized task to your email.
         </p>
 
         {/* Grid */}
