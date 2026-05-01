@@ -343,34 +343,39 @@ async function processCandidate(profile) {
     console.log("✅ PDF generated");
 
     // Send email with PDF attachment
-    await transporter.sendMail({
-      from: `"OpenClaw Hiring" <${process.env.GMAIL_USER}>`,
-      to: profile.email,
-      subject: `Your Assignment Task — ${task.title}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #1e293b;">Hi ${profile.name},</h2>
-          <p style="color: #475569;">Thank you for applying! We've prepared a personalized assignment for you.</p>
-          <div style="background: #f8fafc; border-left: 4px solid #6366f1; padding: 16px; margin: 20px 0; border-radius: 4px;">
-            <h3 style="color: #0f172a; margin: 0 0 8px 0;">${task.title}</h3>
-            <p style="color: #64748b; margin: 0;">${task.scenario}</p>
+    try {
+      await transporter.sendMail({
+        from: `"OpenClaw Hiring" <${process.env.GMAIL_USER}>`,
+        to: profile.email,
+        subject: `Your Assignment Task — ${task.title}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #1e293b;">Hi ${profile.name},</h2>
+            <p style="color: #475569;">Thank you for applying! We've prepared a personalized assignment for you.</p>
+            <div style="background: #f8fafc; border-left: 4px solid #6366f1; padding: 16px; margin: 20px 0; border-radius: 4px;">
+              <h3 style="color: #0f172a; margin: 0 0 8px 0;">${task.title}</h3>
+              <p style="color: #64748b; margin: 0;">${task.scenario}</p>
+            </div>
+            <p style="color: #475569;">📎 Please find the complete task details in the attached PDF.</p>
+            <p style="color: #475569;"><strong>Deadline:</strong> ${task.deadline_days} days</p>
+            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+            <p style="color: #94a3b8; font-size: 12px;">OpenClaw Hiring Team</p>
           </div>
-          <p style="color: #475569;">📎 Please find the complete task details in the attached PDF.</p>
-          <p style="color: #475569;"><strong>Deadline:</strong> ${task.deadline_days} days</p>
-          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
-          <p style="color: #94a3b8; font-size: 12px;">OpenClaw Hiring Team</p>
-        </div>
-      `,
-      attachments: [
-        {
-          filename: `task-${profile.name.replace(/\s+/g, '-').toLowerCase()}.pdf`,
-          content: pdfBuffer,
-          contentType: 'application/pdf'
-        }
-      ]
-    });
+        `,
+        attachments: [
+          {
+            filename: `task-${profile.name.replace(/\s+/g, '-').toLowerCase()}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf'
+          }
+        ]
+      });
+      console.log("✅ Email sent with PDF to:", profile.email);
+    } catch (emailErr) {
+      // Email failed but task was generated — don't crash the whole request
+      console.error("❌ Email send failed:", emailErr.message);
+    }
 
-    console.log("✅ Email sent with PDF to:", profile.email);
     return task;
 
   } catch (err) {

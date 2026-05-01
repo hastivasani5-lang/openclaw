@@ -22,12 +22,27 @@ export default function Form() {
     setLoading(true);
     setMsg("");
 
+    // Frontend validation
+    if (!form.email) {
+      setMsg("❌ Email is required");
+      setLoading(false);
+      return;
+    }
+    if (!form.name) {
+      setMsg("❌ Full name is required");
+      setLoading(false);
+      return;
+    }
+
     try {
       const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:4000";
+      console.log("Submitting to:", backendUrl, "with data:", form);
       const res = await axios.post(`${backendUrl}/api/apply`, form);
       setMsg("✅ Task generated: " + res.data.task);
     } catch (err) {
-      setMsg("❌ Error: " + err.message);
+      const errMsg = err.response?.data?.error || err.response?.data?.details || err.message;
+      setMsg("❌ Error: " + errMsg);
+      console.error("Submit error:", err.response?.data || err.message);
     }
 
     setLoading(false);
@@ -87,6 +102,7 @@ export default function Form() {
             <label>Full Name *</label>
             <input
               name="name"
+              value={form.name}
               placeholder="John Doe"
               onChange={handleChange}
               style={inputStyle}
@@ -98,6 +114,8 @@ export default function Form() {
             <label>Email *</label>
             <input
               name="email"
+              type="email"
+              value={form.email}
               placeholder="john@example.com"
               onChange={handleChange}
               style={inputStyle}
@@ -109,6 +127,7 @@ export default function Form() {
             <label>Phone Number *</label>
             <input
               name="phone"
+              value={form.phone}
               placeholder="+91 98765 43210"
               onChange={handleChange}
               style={inputStyle}
@@ -120,6 +139,7 @@ export default function Form() {
             <label>Experience *</label>
             <select
               name="experience"
+              value={form.experience}
               onChange={handleChange}
               style={inputStyle}
             >
@@ -137,6 +157,7 @@ export default function Form() {
           <label>Skills *</label>
           <input
             name="skills"
+            value={form.skills}
             placeholder="React, Node.js, MongoDB..."
             onChange={handleChange}
             style={inputStyle}
@@ -148,6 +169,7 @@ export default function Form() {
           <label>Portfolio / GitHub Link</label>
           <input
             name="portfolio"
+            value={form.portfolio}
             placeholder="https://github.com/yourprofile"
             onChange={handleChange}
             style={inputStyle}
