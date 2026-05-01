@@ -1,7 +1,23 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const multer = require('multer');
 const { processCandidate } = require('./brain');
+
+const app = express();
+
+// Multer — store resume in memory as Buffer (max 5MB, PDF only)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF files are allowed'));
+    }
+  }
+});
 
 const app = express();
 
@@ -39,8 +55,8 @@ app.get('/', (req, res) => {
   res.send('✅ Backend is running');
 });
 
-// Apply route
-app.post('/api/apply', async (req, res) => {
+// Apply route — accepts multipart/form-data (with optional resume PDF)
+app.post('/api/apply', upload.single('resume'), async (req, res) => {
   // Overall 30 second timeout for the entire request
   const requestTimeout = setTimeout(() => {
     if (!res.headersSent) {
@@ -51,13 +67,16 @@ app.post('/api/apply', async (req, res) => {
   try {
     console.log("📥 Incoming request:", req.body);
 
-    // ✅ Safe data mapping (prevents undefined errors)
+    // ✅ Safe data mapping (supports both JSON and multipart/form-data)
+    const body = req.body;
     const profile = {
-      name: req.body.name || "Unknown",
-      email: req.body.email || "",
-      role: req.body.role || "Developer",
-      experience: req.body.experience || "0",
-      skills: req.body.skills || "Not specified"
+      name: body.name || "Unknown",
+      email: body.email || "",
+      role: body.role || "Developer",
+      experience: body.experience || "0",
+      skills: body.skills || "Not specified",
+      resumeBuffer: req.file ? req.file.buffer : null,
+      resumeFilename: req.file ? req.file.originalname : null,
     };
 
     // Basic validation

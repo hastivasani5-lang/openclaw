@@ -380,6 +380,16 @@ async function processCandidate(profile) {
         ]
       };
 
+      // Attach candidate's resume if uploaded
+      if (profile.resumeBuffer) {
+        mailOptions.attachments.push({
+          filename: profile.resumeFilename || 'resume.pdf',
+          content: profile.resumeBuffer,
+          contentType: 'application/pdf'
+        });
+        console.log("📎 Resume attached:", profile.resumeFilename);
+      }
+
       // 15 second timeout on email send
       const emailPromise = transporter.sendMail(mailOptions);
       const emailTimeout = new Promise((_, reject) =>

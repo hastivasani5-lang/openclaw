@@ -8,40 +8,80 @@ export default function Form() {
     phone: "",
     experience: "",
     skills: "",
-    portfolio: ""
   });
 
+  const [resume, setResume] = useState(null);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
+  const [msgColor, setMsgColor] = useState("#94a3b8");
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
+  const handleResumeChange = (e) => {
+    const file = e.target.files[0];
+    if (file && file.type !== "application/pdf") {
+      setMsg("❌ Only PDF files are allowed");
+      setMsgColor("#f87171");
+      e.target.value = "";
+      setResume(null);
+      return;
+    }
+    if (file && file.size > 5 * 1024 * 1024) {
+      setMsg("❌ File size must be under 5MB");
+      setMsgColor("#f87171");
+      e.target.value = "";
+      setResume(null);
+      return;
+    }
+    setResume(file || null);
+    setMsg("");
+  };
+
   const submit = async () => {
+    // Frontend validation
+    if (!form.name) {
+      setMsg("❌ Full name is required");
+      setMsgColor("#f87171");
+      return;
+    }
+    if (!form.email) {
+      setMsg("❌ Email is required");
+      setMsgColor("#f87171");
+      return;
+    }
+
     setLoading(true);
     setMsg("");
 
-    // Frontend validation
-    if (!form.email) {
-      setMsg("❌ Email is required");
-      setLoading(false);
-      return;
-    }
-    if (!form.name) {
-      setMsg("❌ Full name is required");
-      setLoading(false);
-      return;
-    }
-
     try {
       const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:4000";
-      console.log("Submitting to:", backendUrl, "with data:", form);
-      const res = await axios.post(`${backendUrl}/api/apply`, form);
-      setMsg("✅ Task generated: " + res.data.task);
+
+      // Use FormData to send file + fields together
+      const formData = new FormData();
+      formData.append("name", form.name);
+      formData.append("email", form.email);
+      formData.append("phone", form.phone);
+      formData.append("experience", form.experience);
+      formData.append("skills", form.skills);
+      if (resume) {
+        formData.append("resume", resume);
+      }
+
+      const res = await axios.post(`${backendUrl}/api/apply`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      setMsg("✅ Task generated! Check your email: " + res.data.task);
+      setMsgColor("#4ade80");
     } catch (err) {
-      const errMsg = err.response?.data?.error || err.response?.data?.details || err.message;
+      const errMsg =
+        err.response?.data?.error ||
+        err.response?.data?.details ||
+        err.message;
       setMsg("❌ Error: " + errMsg);
+      setMsgColor("#f87171");
       console.error("Submit error:", err.response?.data || err.message);
     }
 
@@ -56,7 +96,8 @@ export default function Form() {
     backgroundColor: "#334155",
     color: "white",
     marginTop: "5px",
-    outline: "none"
+    outline: "none",
+    boxSizing: "border-box",
   };
 
   return (
@@ -67,7 +108,7 @@ export default function Form() {
         justifyContent: "center",
         alignItems: "center",
         background: "linear-gradient(to bottom right, #0f172a, #1e293b)",
-        padding: "20px"
+        padding: "20px",
       }}
     >
       <div
@@ -78,12 +119,10 @@ export default function Form() {
           borderRadius: "16px",
           padding: "30px",
           color: "white",
-          boxShadow: "0 10px 30px rgba(0,0,0,0.5)"
+          boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
         }}
       >
-        <h2 style={{ fontSize: "28px", marginBottom: "5px" }}>
-          Apply Now
-        </h2>
+        <h2 style={{ fontSize: "28px", marginBottom: "5px" }}>Apply Now</h2>
 
         <p style={{ color: "#94a3b8", marginBottom: "20px" }}>
           Fill in your details and we'll send a personalized task to your email.
@@ -94,7 +133,7 @@ export default function Form() {
           style={{
             display: "grid",
             gridTemplateColumns: "1fr 1fr",
-            gap: "15px"
+            gap: "15px",
           }}
         >
           {/* Name */}
@@ -124,7 +163,7 @@ export default function Form() {
 
           {/* Phone */}
           <div>
-            <label>Phone Number *</label>
+            <label>Phone Number</label>
             <input
               name="phone"
               value={form.phone}
@@ -164,16 +203,49 @@ export default function Form() {
           />
         </div>
 
-        {/* Portfolio */}
+        {/* Resume Upload */}
         <div style={{ marginTop: "15px" }}>
-          <label>Portfolio / GitHub Link</label>
-          <input
-            name="portfolio"
-            value={form.portfolio}
-            placeholder="https://github.com/yourprofile"
-            onChange={handleChange}
-            style={inputStyle}
-          />
+          <label>Resume (PDF)</label>
+          <div
+            style={{
+              marginTop: "5px",
+              border: "2px dashed #475569",
+              borderRadius: "8px",
+              padding: "16px",
+              textAlign: "center",
+              backgroundColor: "#273549",
+              cursor: "pointer",
+              position: "relative",
+            }}
+          >
+            <input
+              type="file"
+              accept=".pdf"
+              onChange={handleResumeChange}
+              style={{
+                position: "absolute",
+                inset: 0,
+                opacity: 0,
+                cursor: "pointer",
+                width: "100%",
+                height: "100%",
+              }}
+            />
+            {resume ? (
+              <p style={{ color: "#4ade80", margin: 0, fontSize: "14px" }}>
+                📄 {resume.name}
+              </p>
+            ) : (
+              <>
+                <p style={{ color: "#94a3b8", margin: 0, fontSize: "14px" }}>
+                  📎 Click to upload your resume
+                </p>
+                <p style={{ color: "#64748b", margin: "4px 0 0", fontSize: "12px" }}>
+                  PDF only · Max 5MB
+                </p>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Button */}
@@ -192,7 +264,7 @@ export default function Form() {
             color: "white",
             fontSize: "16px",
             fontWeight: "bold",
-            cursor: loading ? "not-allowed" : "pointer"
+            cursor: loading ? "not-allowed" : "pointer",
           }}
         >
           {loading ? "Generating..." : "Submit Application →"}
@@ -200,7 +272,7 @@ export default function Form() {
 
         {/* Message */}
         {msg && (
-          <p style={{ marginTop: "15px", color: "#94a3b8" }}>
+          <p style={{ marginTop: "15px", color: msgColor, fontSize: "14px" }}>
             {msg}
           </p>
         )}
@@ -211,7 +283,7 @@ export default function Form() {
             marginTop: "20px",
             fontSize: "12px",
             color: "#64748b",
-            textAlign: "center"
+            textAlign: "center",
           }}
         >
           🔒 Your data is secure. A personalized task will be sent to your email.
