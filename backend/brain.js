@@ -5,7 +5,7 @@ const PDFDocument = require('pdfkit');
 
 // Gemini setup
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
 // Email setup
 const transporter = nodemailer.createTransport({
@@ -285,8 +285,7 @@ function generateFallbackTask(profile) {
 
 // Generate unique task using Gemini
 async function generateTask(profile) {
-  const prompt = `
-You are a senior engineering manager at a tech company.
+  const prompt = `You are a senior engineering manager at a tech company.
 
 Generate a UNIQUE and SPECIFIC practical assignment task for this candidate.
 Make it highly personalized based on their exact skills and experience level.
@@ -299,31 +298,34 @@ Candidate Profile:
 - Skills: ${profile.skills}
 
 Rules:
-- Return ONLY valid JSON, no markdown, no explanation
+- Return ONLY valid JSON, no markdown, no explanation, no code blocks
 - Task must be specific to their skills: ${profile.skills}
-- Make it realistic and challenging but achievable in ${profile.experience} experience level
-- Be creative and unique — no two candidates should get the same task
+- Make it realistic and challenging but achievable for ${profile.experience} experience level
+- Be creative and unique
 
-JSON Format:
-{
-  "title": "specific task title based on their skills",
-  "scenario": "detailed real-world scenario description (3-4 sentences)",
-  "requirements": ["requirement 1", "requirement 2", "requirement 3", "requirement 4"],
-  "deliverables": ["deliverable 1", "deliverable 2", "deliverable 3"],
-  "evaluation_criteria": ["criteria 1", "criteria 2", "criteria 3"],
-  "deadline_days": 3
-}
-`;
+Return ONLY this JSON (no extra text):
+{"title":"specific task title","scenario":"detailed real-world scenario (3-4 sentences)","requirements":["req1","req2","req3","req4"],"deliverables":["del1","del2","del3"],"evaluation_criteria":["crit1","crit2","crit3"],"deadline_days":3}`;
 
   try {
     const result = await model.generateContent(prompt);
     let text = result.response.text();
-    text = text.replace(/```json|```/g, '').trim();
-    console.log("✅ Gemini task generated for:", profile.name);
-    return JSON.parse(text);
+    // Strip any markdown code fences
+    text = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    // Extract JSON if there's extra text around it
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("No JSON found in Gemini response");
+    const parsed = JSON.parse(jsonMatch[0]);
+    console.log("✅ Gemini task generated for:", profile.name, "→", parsed.title);
+    return parsed;
 
   } catch (err) {
-    console.error("❌ Gemini error:", err.message);
+    if (err.status === 429) {
+      console.warn("⚠️  Gemini quota exceeded — using smart fallback task generator");
+    } else if (err.status === 404) {
+      console.warn("⚠️  Gemini model not found — using smart fallback task generator");
+    } else {
+      console.error("❌ Gemini error:", err.message, "— using fallback");
+    }
     return generateFallbackTask(profile);
   }
 }
