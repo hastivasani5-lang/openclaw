@@ -9,7 +9,10 @@ const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
 // Email setup
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true,
+  family: 4, // force IPv4 — Render free tier doesn't support IPv6
   auth: {
     user: process.env.GMAIL_USER,
     pass: (process.env.GMAIL_APP_PASSWORD || '').replace(/\s/g, '')
