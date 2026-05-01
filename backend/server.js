@@ -41,6 +41,13 @@ app.get('/', (req, res) => {
 
 // Apply route
 app.post('/api/apply', async (req, res) => {
+  // Overall 30 second timeout for the entire request
+  const requestTimeout = setTimeout(() => {
+    if (!res.headersSent) {
+      res.status(504).json({ error: "Request timed out. Please try again." });
+    }
+  }, 30000);
+
   try {
     console.log("📥 Incoming request:", req.body);
 
@@ -53,25 +60,32 @@ app.post('/api/apply', async (req, res) => {
       skills: req.body.skills || "Not specified"
     };
 
-    // ❌ Basic validation
+    // Basic validation
     if (!profile.email) {
+      clearTimeout(requestTimeout);
       return res.status(400).json({ error: "Email is required" });
     }
 
     const result = await processCandidate(profile);
 
-    res.json({
-      success: true,
-      task: result.title || "Task generated"
-    });
+    clearTimeout(requestTimeout);
+    if (!res.headersSent) {
+      res.json({
+        success: true,
+        task: result.title || "Task generated"
+      });
+    }
 
   } catch (err) {
+    clearTimeout(requestTimeout);
     console.error("❌ Server error:", err.message);
 
-    res.status(500).json({
-      error: "Something went wrong",
-      details: err.message
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: "Something went wrong",
+        details: err.message
+      });
+    }
   }
 });
 

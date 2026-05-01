@@ -307,7 +307,13 @@ Return ONLY this JSON (no extra text):
 {"title":"specific task title","scenario":"detailed real-world scenario (3-4 sentences)","requirements":["req1","req2","req3","req4"],"deliverables":["del1","del2","del3"],"evaluation_criteria":["crit1","crit2","crit3"],"deadline_days":3}`;
 
   try {
-    const result = await model.generateContent(prompt);
+    // 10 second timeout on Gemini call — prevents hanging on Render
+    const geminiPromise = model.generateContent(prompt);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Gemini timeout after 10s")), 10000)
+    );
+    const result = await Promise.race([geminiPromise, timeoutPromise]);
+
     let text = result.response.text();
     // Strip any markdown code fences
     text = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
@@ -319,12 +325,12 @@ Return ONLY this JSON (no extra text):
     return parsed;
 
   } catch (err) {
-    if (err.status === 429) {
-      console.warn("⚠️  Gemini quota exceeded — using smart fallback task generator");
-    } else if (err.status === 404) {
-      console.warn("⚠️  Gemini model not found — using smart fallback task generator");
+    if (err.status === 429 || err.message?.includes('429')) {
+      console.warn("⚠️  Gemini quota exceeded — using fallback");
+    } else if (err.status === 404 || err.message?.includes('404')) {
+      console.warn("⚠️  Gemini model not found — using fallback");
     } else {
-      console.error("❌ Gemini error:", err.message, "— using fallback");
+      console.warn("⚠️  Gemini error:", err.message, "— using fallback");
     }
     return generateFallbackTask(profile);
   }
@@ -344,7 +350,7 @@ async function processCandidate(profile) {
 
     // Send email with PDF attachment
     try {
-      await transporter.sendMail({
+      const mailOptions = {
         from: `"OpenClaw Hiring" <${process.env.GMAIL_USER}>`,
         to: profile.email,
         subject: `Your Assignment Task — ${task.title}`,
@@ -369,7 +375,14 @@ async function processCandidate(profile) {
             contentType: 'application/pdf'
           }
         ]
-      });
+      };
+
+      // 15 second timeout on email send
+      const emailPromise = transporter.sendMail(mailOptions);
+      const emailTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Email timeout after 15s")), 15000)
+      );
+      await Promise.race([emailPromise, emailTimeout]);
       console.log("✅ Email sent with PDF to:", profile.email);
     } catch (emailErr) {
       // Email failed but task was generated — don't crash the whole request
