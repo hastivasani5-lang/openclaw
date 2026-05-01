@@ -179,17 +179,20 @@ export default function Form() {
         {/* Button */}
         <button
           onClick={submit}
+          disabled={loading}
           style={{
             width: "100%",
             marginTop: "20px",
             padding: "14px",
             borderRadius: "10px",
             border: "none",
-            background: "linear-gradient(to right, #2563eb, #3b82f6)",
+            background: loading
+              ? "linear-gradient(to right, #475569, #64748b)"
+              : "linear-gradient(to right, #2563eb, #3b82f6)",
             color: "white",
             fontSize: "16px",
             fontWeight: "bold",
-            cursor: "pointer"
+            cursor: loading ? "not-allowed" : "pointer"
           }}
         >
           {loading ? "Generating..." : "Submit Application →"}
