@@ -1,23 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const multer = require('multer');
 const { processCandidate } = require('./brain');
 
 const app = express();
-
-// Multer — store resume in memory as Buffer (max 5MB, PDF only)
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    if (file.mimetype === 'application/pdf') {
-      cb(null, true);
-    } else {
-      cb(new Error('Only PDF files are allowed'));
-    }
-  }
-});
 
 // CORS
 const allowedOrigins = [
@@ -42,15 +28,100 @@ app.use(cors({
 }));
 
 app.options('/{*path}', cors());
-app.use(express.json());
+
+// Body parsers — only for non-multipart requests
+app.use((req, res, next) => {
+  const ct = req.headers['content-type'] || '';
+  if (ct.includes('multipart/form-data')) return next(); // skip for file uploads
+  express.json()(req, res, next);
+});
+app.use((req, res, next) => {
+  const ct = req.headers['content-type'] || '';
+  if (ct.includes('multipart/form-data')) return next();
+  express.urlencoded({ extended: true })(req, res, next);
+});
 
 // Health check
 app.get('/', (_req, res) => {
   res.send('✅ Backend is running');
 });
 
-// Apply route — accepts multipart/form-data (with optional resume PDF)
-app.post('/api/apply', upload.single('resume'), async (req, res) => {
+// Helper: parse multipart/form-data manually
+function parseMultipart(req) {
+  return new Promise((resolve, reject) => {
+    let body = Buffer.alloc(0);
+    req.on('data', chunk => { body = Buffer.concat([body, chunk]); });
+    req.on('end', () => {
+      try {
+        const contentType = req.headers['content-type'] || '';
+        const boundaryMatch = contentType.match(/boundary=(.+)$/);
+        if (!boundaryMatch) return resolve({ fields: {}, resumeBuffer: null, resumeFilename: null });
+
+        const boundary = boundaryMatch[1].trim();
+        const fields = {};
+        let resumeBuffer = null;
+        let resumeFilename = null;
+
+        // Split by boundary
+        const delimiter = Buffer.from(`--${boundary}`);
+        const parts = splitBuffer(body, delimiter);
+
+        for (const part of parts) {
+          if (!part || part.length < 4) continue;
+          const str = part.toString('binary');
+          const headerEnd = str.indexOf('\r\n\r\n');
+          if (headerEnd === -1) continue;
+
+          const headerStr = str.substring(0, headerEnd);
+          const contentBytes = part.slice(headerEnd + 4);
+          // Remove trailing \r\n
+          const valueBytes = contentBytes.slice(0, contentBytes.length - 2);
+
+          const nameMatch = headerStr.match(/name="([^"]+)"/);
+          const filenameMatch = headerStr.match(/filename="([^"]+)"/);
+
+          if (!nameMatch) continue;
+          const fieldName = nameMatch[1];
+
+          if (filenameMatch) {
+            // File field
+            if (headerStr.includes('application/pdf')) {
+              resumeFilename = filenameMatch[1];
+              resumeBuffer = valueBytes;
+            }
+          } else {
+            // Text field
+            fields[fieldName] = valueBytes.toString('utf8');
+          }
+        }
+
+        resolve({ fields, resumeBuffer, resumeFilename });
+      } catch (e) {
+        reject(e);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function splitBuffer(buf, delimiter) {
+  const parts = [];
+  let start = 0;
+  while (start < buf.length) {
+    const idx = buf.indexOf(delimiter, start);
+    if (idx === -1) break;
+    if (idx > start) parts.push(buf.slice(start, idx));
+    start = idx + delimiter.length;
+    // skip \r\n after boundary
+    if (buf[start] === 0x0d && buf[start + 1] === 0x0a) start += 2;
+    // stop at --boundary--
+    if (buf[start] === 0x2d && buf[start + 1] === 0x2d) break;
+  }
+  return parts;
+}
+
+// Apply route
+app.post('/api/apply', async (req, res) => {
   const requestTimeout = setTimeout(() => {
     if (!res.headersSent) {
       res.status(504).json({ error: "Request timed out. Please try again." });
@@ -58,17 +129,31 @@ app.post('/api/apply', upload.single('resume'), async (req, res) => {
   }, 30000);
 
   try {
-    console.log("📥 Incoming request body:", req.body);
+    let fields = {};
+    let resumeBuffer = null;
+    let resumeFilename = null;
 
-    const body = req.body;
+    const contentType = req.headers['content-type'] || '';
+
+    if (contentType.includes('multipart/form-data')) {
+      const parsed = await parseMultipart(req);
+      fields = parsed.fields;
+      resumeBuffer = parsed.resumeBuffer;
+      resumeFilename = parsed.resumeFilename;
+    } else {
+      fields = req.body || {};
+    }
+
+    console.log("📥 Fields received:", JSON.stringify(fields));
+
     const profile = {
-      name: body.name || "Unknown",
-      email: body.email || "",
-      role: body.role || "Developer",
-      experience: body.experience || "0",
-      skills: body.skills || "Not specified",
-      resumeBuffer: req.file ? req.file.buffer : null,
-      resumeFilename: req.file ? req.file.originalname : null,
+      name: fields.name || "Unknown",
+      email: fields.email || "",
+      role: fields.role || "Developer",
+      experience: fields.experience || "0",
+      skills: fields.skills || "Not specified",
+      resumeBuffer,
+      resumeFilename,
     };
 
     if (!profile.email) {
