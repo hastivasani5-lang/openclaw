@@ -1,14 +1,15 @@
 require('dotenv').config();
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { Resend } = require('resend');
+const Brevo = require('@getbrevo/brevo');
 const PDFDocument = require('pdfkit');
 
 // Gemini setup
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-// Resend email setup (HTTP API — works on Render free tier, no SMTP needed)
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Brevo (Sendinblue) email setup — HTTP API, works on Render, no domain verification needed
+const brevoClient = new Brevo.TransactionalEmailsApi();
+brevoClient.authentications['api-key'].apiKey = process.env.BREVO_API_KEY || '';
 
 // Generate PDF buffer from task
 function generatePDF(task, profile) {
@@ -364,56 +365,51 @@ async function processCandidate(profile) {
       // Continue without PDF — email will be sent without attachment
     }
 
-    // Send email with PDF attachment via Resend (HTTP API — no SMTP needed)
+    // Send email with PDF attachment via Brevo HTTP API
     try {
-      const attachments = [];
+      const sendSmtpEmail = new Brevo.SendSmtpEmail();
+      sendSmtpEmail.subject = `Your Assignment Task — ${task.title}`;
+      sendSmtpEmail.htmlContent = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #1e293b;">Hi ${profile.name},</h2>
+          <p style="color: #475569;">Thank you for applying! We've prepared a personalized assignment for you.</p>
+          <div style="background: #f8fafc; border-left: 4px solid #6366f1; padding: 16px; margin: 20px 0; border-radius: 4px;">
+            <h3 style="color: #0f172a; margin: 0 0 8px 0;">${task.title}</h3>
+            <p style="color: #64748b; margin: 0;">${task.scenario}</p>
+          </div>
+          <p style="color: #475569;">📎 Please find the complete task details in the attached PDF.</p>
+          <p style="color: #475569;"><strong>Deadline:</strong> ${task.deadline_days} days</p>
+          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+          <p style="color: #94a3b8; font-size: 12px;">OpenClaw Hiring Team</p>
+        </div>
+      `;
+      sendSmtpEmail.sender = { name: 'OpenClaw Hiring', email: process.env.BREVO_SENDER_EMAIL || process.env.GMAIL_USER };
+      sendSmtpEmail.to = [{ email: profile.email, name: profile.name }];
 
+      // Attach PDF
       if (pdfBuffer) {
-        attachments.push({
-          filename: `task-${(profile.name || 'candidate').replace(/\s+/g, '-').toLowerCase()}.pdf`,
+        sendSmtpEmail.attachment = [{
+          name: `task-${(profile.name || 'candidate').replace(/\s+/g, '-').toLowerCase()}.pdf`,
           content: pdfBuffer.toString('base64'),
-        });
+        }];
       }
 
+      // Attach resume if uploaded
       if (profile.resumeBuffer) {
-        attachments.push({
-          filename: profile.resumeFilename || 'resume.pdf',
+        if (!sendSmtpEmail.attachment) sendSmtpEmail.attachment = [];
+        sendSmtpEmail.attachment.push({
+          name: profile.resumeFilename || 'resume.pdf',
           content: profile.resumeBuffer.toString('base64'),
         });
         console.log("📎 Resume attached:", profile.resumeFilename);
       }
 
-      const emailPromise = resend.emails.send({
-        from: 'OpenClaw Hiring <onboarding@resend.dev>',
-        to: profile.email,
-        subject: `Your Assignment Task — ${task.title}`,
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2 style="color: #1e293b;">Hi ${profile.name},</h2>
-            <p style="color: #475569;">Thank you for applying! We've prepared a personalized assignment for you.</p>
-            <div style="background: #f8fafc; border-left: 4px solid #6366f1; padding: 16px; margin: 20px 0; border-radius: 4px;">
-              <h3 style="color: #0f172a; margin: 0 0 8px 0;">${task.title}</h3>
-              <p style="color: #64748b; margin: 0;">${task.scenario}</p>
-            </div>
-            <p style="color: #475569;">📎 Please find the complete task details in the attached PDF.</p>
-            <p style="color: #475569;"><strong>Deadline:</strong> ${task.deadline_days} days</p>
-            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
-            <p style="color: #94a3b8; font-size: 12px;">OpenClaw Hiring Team</p>
-          </div>
-        `,
-        attachments,
-      });
-
+      const emailPromise = brevoClient.sendTransacEmail(sendSmtpEmail);
       const emailTimeout = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Email timeout after 25s")), 25000)
       );
-      const emailResult = await Promise.race([emailPromise, emailTimeout]);
-
-      if (emailResult.error) {
-        throw new Error(emailResult.error.message || JSON.stringify(emailResult.error));
-      }
-
-      console.log("✅ Email sent via Resend to:", profile.email);
+      await Promise.race([emailPromise, emailTimeout]);
+      console.log("✅ Email sent via Brevo to:", profile.email);
     } catch (emailErr) {
       console.error("❌ Email send failed:", emailErr.message);
       task._emailError = emailErr.message;
