@@ -404,7 +404,7 @@ async function processCandidate(profile) {
       }
 
       const mailOptions = {
-        from: `"OpenClaw Hiring" <${process.env.BREVO_SMTP_USER}>`,
+        from: `"OpenClaw Hiring" <${process.env.GMAIL_USER}>`,
         to: profile.email,
         subject: `Your Assignment Task — ${task.title}`,
         html: `
