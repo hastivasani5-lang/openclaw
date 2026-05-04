@@ -7,14 +7,14 @@ const PDFDocument = require('pdfkit');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-// Brevo SMTP on port 2525 — works on Render free tier (ports 465/587 are blocked, 2525 is open)
+// Mailersend SMTP — port 2525 works on Render free tier
 const transporter = nodemailer.createTransport({
-  host: 'smtp-relay.brevo.com',
+  host: 'smtp.mailersend.net',
   port: 2525,
   secure: false,
   auth: {
-    user: process.env.BREVO_SMTP_USER,   // Brevo SMTP login (your Brevo account email)
-    pass: process.env.BREVO_SMTP_PASS    // Brevo SMTP master password (from Brevo dashboard)
+    user: process.env.BREVO_SMTP_USER,
+    pass: process.env.BREVO_SMTP_PASS
   }
 });
 
