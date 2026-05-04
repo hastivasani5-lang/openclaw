@@ -1,14 +1,47 @@
 require('dotenv').config();
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const sgMail = require('@sendgrid/mail');
+const nodemailer = require('nodemailer');
 const PDFDocument = require('pdfkit');
 
 // Gemini setup
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-// SendGrid setup — HTTP API, works on Render, sends to any email, free 100/day
-sgMail.setApiKey(process.env.SENDGRID_API_KEY || '');
+// Nodemailer + Brevo SMTP — reliable on cloud servers (Render), 300 free emails/day
+// Falls back to Gmail if Brevo creds not set
+const isBrevo = !!(process.env.BREVO_SMTP_USER && process.env.BREVO_SMTP_PASS);
+
+const transporter = nodemailer.createTransport(
+  isBrevo
+    ? {
+        host: 'smtp-relay.brevo.com',
+        port: 587,
+        secure: false,
+        auth: {
+          user: process.env.BREVO_SMTP_USER,
+          pass: process.env.BREVO_SMTP_PASS,
+        },
+      }
+    : {
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        auth: {
+          user: process.env.GMAIL_USER,
+          pass: process.env.GMAIL_APP_PASSWORD,
+        },
+        family: 4,
+      }
+);
+
+// Verify SMTP connection on startup — check Render logs for result
+transporter.verify((err, success) => {
+  if (err) {
+    console.error("❌ SMTP connection failed:", err.message);
+  } else {
+    console.log(`✅ SMTP ready via ${isBrevo ? 'Brevo' : 'Gmail'} — emails will send`);
+  }
+});
 
 // Generate PDF buffer from task
 function generatePDF(task, profile) {
@@ -364,35 +397,30 @@ async function processCandidate(profile) {
       // Continue without PDF — email will be sent without attachment
     }
 
-    // Send email via SendGrid HTTP API — works on Render, sends to any email
+    // Send email via Nodemailer + Gmail — works on Render
     try {
       const attachments = [];
 
       if (pdfBuffer) {
         attachments.push({
-          content: pdfBuffer.toString('base64'),
           filename: `task-${(profile.name || 'candidate').replace(/\s+/g, '-').toLowerCase()}.pdf`,
-          type: 'application/pdf',
-          disposition: 'attachment',
+          content: pdfBuffer,
+          contentType: 'application/pdf',
         });
       }
 
       if (profile.resumeBuffer) {
         attachments.push({
-          content: profile.resumeBuffer.toString('base64'),
           filename: profile.resumeFilename || 'resume.pdf',
-          type: 'application/pdf',
-          disposition: 'attachment',
+          content: profile.resumeBuffer,
+          contentType: 'application/pdf',
         });
         console.log("📎 Resume attached:", profile.resumeFilename);
       }
 
-      const msg = {
+      const mailOptions = {
+        from: `"OpenClaw Hiring" <${isBrevo ? process.env.BREVO_SMTP_USER : process.env.GMAIL_USER}>`,
         to: profile.email,
-        from: {
-          email: process.env.SENDGRID_FROM_EMAIL,
-          name: 'OpenClaw Hiring'
-        },
         subject: `Your Assignment Task — ${task.title}`,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -411,14 +439,14 @@ async function processCandidate(profile) {
         attachments,
       };
 
-      const emailPromise = sgMail.send(msg);
+      const emailPromise = transporter.sendMail(mailOptions);
       const emailTimeout = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Email timeout after 25s")), 25000)
       );
       await Promise.race([emailPromise, emailTimeout]);
-      console.log("✅ Email sent via SendGrid to:", profile.email);
+      console.log(`✅ Email sent via ${isBrevo ? 'Brevo' : 'Gmail'} to:`, profile.email);
     } catch (emailErr) {
-      const errMsg = emailErr.response?.body?.errors?.[0]?.message || emailErr.message;
+      const errMsg = emailErr.message;
       console.error("❌ Email send failed:", errMsg);
       task._emailError = errMsg;
     }
