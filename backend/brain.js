@@ -10,12 +10,15 @@ const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 // Email setup
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
-  family: 4, // force IPv4 — Render free tier doesn't support IPv6
+  port: 587,
+  secure: false, // STARTTLS — port 465 is blocked on Render free tier
+  family: 4,
   auth: {
     user: process.env.GMAIL_USER,
     pass: (process.env.GMAIL_APP_PASSWORD || '').replace(/\s/g, '')
+  },
+  tls: {
+    rejectUnauthorized: false
   }
 });
 
@@ -415,7 +418,7 @@ async function processCandidate(profile) {
       // 15 second timeout on email send
       const emailPromise = transporter.sendMail(mailOptions);
       const emailTimeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Email timeout after 15s")), 15000)
+        setTimeout(() => reject(new Error("Email timeout after 25s")), 25000)
       );
       await Promise.race([emailPromise, emailTimeout]);
       console.log("✅ Email sent with PDF to:", profile.email);
