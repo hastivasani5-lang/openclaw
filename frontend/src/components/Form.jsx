@@ -73,8 +73,13 @@ export default function Form() {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
-      setMsg("✅ Task generated! Check your email: " + res.data.task);
-      setMsgColor("#4ade80");
+      if (res.data.emailError) {
+        setMsg("⚠️ Task generated but email failed: " + res.data.emailError);
+        setMsgColor("#facc15");
+      } else {
+        setMsg("✅ Task generated! Check your email: " + res.data.task);
+        setMsgColor("#4ade80");
+      }
     } catch (err) {
       const errMsg =
         err.response?.data?.error ||
