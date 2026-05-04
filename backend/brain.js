@@ -8,38 +8,23 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
 // Nodemailer + Brevo SMTP — reliable on cloud servers (Render), 300 free emails/day
-// Falls back to Gmail if Brevo creds not set
-const isBrevo = !!(process.env.BREVO_SMTP_USER && process.env.BREVO_SMTP_PASS);
-
-const transporter = nodemailer.createTransport(
-  isBrevo
-    ? {
-        host: 'smtp-relay.brevo.com',
-        port: 587,
-        secure: false,
-        auth: {
-          user: process.env.BREVO_SMTP_USER,
-          pass: process.env.BREVO_SMTP_PASS,
-        },
-      }
-    : {
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
-        auth: {
-          user: process.env.GMAIL_USER,
-          pass: process.env.GMAIL_APP_PASSWORD,
-        },
-        family: 4,
-      }
-);
+const transporter = nodemailer.createTransport({
+  host: 'smtp-relay.brevo.com',
+  port: 587,
+  secure: false,
+  auth: {
+    user: process.env.BREVO_SMTP_USER,
+    pass: process.env.BREVO_SMTP_PASS,
+  },
+});
 
 // Verify SMTP connection on startup — check Render logs for result
 transporter.verify((err, success) => {
   if (err) {
-    console.error("❌ SMTP connection failed:", err.message);
+    console.error("❌ Brevo SMTP connection failed:", err.message);
+    console.error("   → Check BREVO_SMTP_USER and BREVO_SMTP_PASS in Render env vars");
   } else {
-    console.log(`✅ SMTP ready via ${isBrevo ? 'Brevo' : 'Gmail'} — emails will send`);
+    console.log("✅ Brevo SMTP ready — emails will send");
   }
 });
 
@@ -419,7 +404,7 @@ async function processCandidate(profile) {
       }
 
       const mailOptions = {
-        from: `"OpenClaw Hiring" <${isBrevo ? process.env.BREVO_SMTP_USER : process.env.GMAIL_USER}>`,
+        from: `"OpenClaw Hiring" <${process.env.BREVO_SMTP_USER}>`,
         to: profile.email,
         subject: `Your Assignment Task — ${task.title}`,
         html: `
@@ -444,7 +429,7 @@ async function processCandidate(profile) {
         setTimeout(() => reject(new Error("Email timeout after 25s")), 25000)
       );
       await Promise.race([emailPromise, emailTimeout]);
-      console.log(`✅ Email sent via ${isBrevo ? 'Brevo' : 'Gmail'} to:`, profile.email);
+      console.log(`✅ Email sent via Brevo to:`, profile.email);
     } catch (emailErr) {
       const errMsg = emailErr.message;
       console.error("❌ Email send failed:", errMsg);
