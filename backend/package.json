@@ -14,6 +14,7 @@
   "dependencies": {
     "@getbrevo/brevo": "^5.0.4",
     "@google/generative-ai": "^0.24.1",
+    "@sendgrid/mail": "^8.1.6",
     "busboy": "1.6.0",
     "cors": "^2.8.6",
     "dotenv": "16.4.5",

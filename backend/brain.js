@@ -1,35 +1,14 @@
 require('dotenv').config();
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const nodemailer = require('nodemailer');
-const { google } = require('googleapis');
+const sgMail = require('@sendgrid/mail');
 const PDFDocument = require('pdfkit');
 
 // Gemini setup
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-// Gmail OAuth2 setup — uses HTTP API, not SMTP (works on Render free tier)
-const oauth2Client = new google.auth.OAuth2(
-  process.env.GMAIL_CLIENT_ID,
-  process.env.GMAIL_CLIENT_SECRET,
-  'https://developers.google.com/oauthplayground'
-);
-oauth2Client.setCredentials({ refresh_token: process.env.GMAIL_REFRESH_TOKEN });
-
-async function createTransporter() {
-  const accessToken = await oauth2Client.getAccessToken();
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      type: 'OAuth2',
-      user: process.env.GMAIL_USER,
-      clientId: process.env.GMAIL_CLIENT_ID,
-      clientSecret: process.env.GMAIL_CLIENT_SECRET,
-      refreshToken: process.env.GMAIL_REFRESH_TOKEN,
-      accessToken: accessToken.token,
-    },
-  });
-}
+// SendGrid setup — HTTP API, works on Render, sends to any email, free 100/day
+sgMail.setApiKey(process.env.SENDGRID_API_KEY || '');
 
 // Generate PDF buffer from task
 function generatePDF(task, profile) {
@@ -385,12 +364,35 @@ async function processCandidate(profile) {
       // Continue without PDF — email will be sent without attachment
     }
 
-    // Send email via Gmail OAuth2 HTTP API — works on Render (no SMTP ports needed)
+    // Send email via SendGrid HTTP API — works on Render, sends to any email
     try {
-      const transporter = await createTransporter();
-      const mailOptions = {
-        from: `"OpenClaw Hiring" <${process.env.GMAIL_USER}>`,
+      const attachments = [];
+
+      if (pdfBuffer) {
+        attachments.push({
+          content: pdfBuffer.toString('base64'),
+          filename: `task-${(profile.name || 'candidate').replace(/\s+/g, '-').toLowerCase()}.pdf`,
+          type: 'application/pdf',
+          disposition: 'attachment',
+        });
+      }
+
+      if (profile.resumeBuffer) {
+        attachments.push({
+          content: profile.resumeBuffer.toString('base64'),
+          filename: profile.resumeFilename || 'resume.pdf',
+          type: 'application/pdf',
+          disposition: 'attachment',
+        });
+        console.log("📎 Resume attached:", profile.resumeFilename);
+      }
+
+      const msg = {
         to: profile.email,
+        from: {
+          email: process.env.SENDGRID_FROM_EMAIL,
+          name: 'OpenClaw Hiring'
+        },
         subject: `Your Assignment Task — ${task.title}`,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -406,35 +408,19 @@ async function processCandidate(profile) {
             <p style="color: #94a3b8; font-size: 12px;">OpenClaw Hiring Team</p>
           </div>
         `,
-        attachments: []
+        attachments,
       };
 
-      if (pdfBuffer) {
-        mailOptions.attachments.push({
-          filename: `task-${(profile.name || 'candidate').replace(/\s+/g, '-').toLowerCase()}.pdf`,
-          content: pdfBuffer,
-          contentType: 'application/pdf'
-        });
-      }
-
-      if (profile.resumeBuffer) {
-        mailOptions.attachments.push({
-          filename: profile.resumeFilename || 'resume.pdf',
-          content: profile.resumeBuffer,
-          contentType: 'application/pdf'
-        });
-        console.log("📎 Resume attached:", profile.resumeFilename);
-      }
-
-      const emailPromise = transporter.sendMail(mailOptions);
+      const emailPromise = sgMail.send(msg);
       const emailTimeout = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Email timeout after 25s")), 25000)
       );
       await Promise.race([emailPromise, emailTimeout]);
-      console.log("✅ Email sent to:", profile.email);
+      console.log("✅ Email sent via SendGrid to:", profile.email);
     } catch (emailErr) {
-      console.error("❌ Email send failed:", emailErr.message);
-      task._emailError = emailErr.message;
+      const errMsg = emailErr.response?.body?.errors?.[0]?.message || emailErr.message;
+      console.error("❌ Email send failed:", errMsg);
+      task._emailError = errMsg;
     }
 
     return task;
