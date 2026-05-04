@@ -22,7 +22,8 @@ const transporter = nodemailer.createTransport({
 // Generate PDF buffer from task
 function generatePDF(task, profile) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 50 });
+    // Use built-in fonts only — no system font dependency (important for Render/cloud)
+    const doc = new PDFDocument({ margin: 50, font: 'Helvetica' });
     const buffers = [];
 
     doc.on('data', (chunk) => buffers.push(chunk));
@@ -362,9 +363,15 @@ async function processCandidate(profile) {
     const task = await generateTask(profile);
     console.log("Generated task:", task.title);
 
-    // Generate PDF
-    const pdfBuffer = await generatePDF(task, profile);
-    console.log("✅ PDF generated");
+    // Generate PDF — wrapped so a PDF failure doesn't kill the whole request
+    let pdfBuffer = null;
+    try {
+      pdfBuffer = await generatePDF(task, profile);
+      console.log("✅ PDF generated");
+    } catch (pdfErr) {
+      console.error("❌ PDF generation failed:", pdfErr.message);
+      // Continue without PDF — email will be sent without attachment
+    }
 
     // Send email with PDF attachment
     try {
@@ -386,13 +393,13 @@ async function processCandidate(profile) {
             <p style="color: #94a3b8; font-size: 12px;">OpenClaw Hiring Team</p>
           </div>
         `,
-        attachments: [
+        attachments: pdfBuffer ? [
           {
-          filename: `task-${(profile.name || 'candidate').replace(/\s+/g, '-').toLowerCase()}.pdf`,
+            filename: `task-${(profile.name || 'candidate').replace(/\s+/g, '-').toLowerCase()}.pdf`,
             content: pdfBuffer,
             contentType: 'application/pdf'
           }
-        ]
+        ] : []
       };
 
       // Attach candidate's resume if uploaded
