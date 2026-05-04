@@ -1,15 +1,22 @@
 require('dotenv').config();
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const Brevo = require('@getbrevo/brevo');
+const nodemailer = require('nodemailer');
 const PDFDocument = require('pdfkit');
 
 // Gemini setup
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-// Brevo (Sendinblue) email setup — HTTP API, works on Render, no domain verification needed
-const brevoClient = new Brevo.TransactionalEmailsApi();
-brevoClient.authentications['api-key'].apiKey = process.env.BREVO_API_KEY || '';
+// Brevo SMTP on port 2525 — works on Render free tier (ports 465/587 are blocked, 2525 is open)
+const transporter = nodemailer.createTransport({
+  host: 'smtp-relay.brevo.com',
+  port: 2525,
+  secure: false,
+  auth: {
+    user: process.env.BREVO_SMTP_USER,   // Brevo SMTP login (your Brevo account email)
+    pass: process.env.BREVO_SMTP_PASS    // Brevo SMTP master password (from Brevo dashboard)
+  }
+});
 
 // Generate PDF buffer from task
 function generatePDF(task, profile) {
@@ -365,51 +372,54 @@ async function processCandidate(profile) {
       // Continue without PDF — email will be sent without attachment
     }
 
-    // Send email with PDF attachment via Brevo HTTP API
+    // Send email with PDF attachment via nodemailer + Brevo SMTP (port 2525 — open on Render)
     try {
-      const sendSmtpEmail = new Brevo.SendSmtpEmail();
-      sendSmtpEmail.subject = `Your Assignment Task — ${task.title}`;
-      sendSmtpEmail.htmlContent = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #1e293b;">Hi ${profile.name},</h2>
-          <p style="color: #475569;">Thank you for applying! We've prepared a personalized assignment for you.</p>
-          <div style="background: #f8fafc; border-left: 4px solid #6366f1; padding: 16px; margin: 20px 0; border-radius: 4px;">
-            <h3 style="color: #0f172a; margin: 0 0 8px 0;">${task.title}</h3>
-            <p style="color: #64748b; margin: 0;">${task.scenario}</p>
+      const mailOptions = {
+        from: `"OpenClaw Hiring" <${process.env.BREVO_SMTP_USER}>`,
+        to: profile.email,
+        subject: `Your Assignment Task — ${task.title}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #1e293b;">Hi ${profile.name},</h2>
+            <p style="color: #475569;">Thank you for applying! We've prepared a personalized assignment for you.</p>
+            <div style="background: #f8fafc; border-left: 4px solid #6366f1; padding: 16px; margin: 20px 0; border-radius: 4px;">
+              <h3 style="color: #0f172a; margin: 0 0 8px 0;">${task.title}</h3>
+              <p style="color: #64748b; margin: 0;">${task.scenario}</p>
+            </div>
+            <p style="color: #475569;">📎 Please find the complete task details in the attached PDF.</p>
+            <p style="color: #475569;"><strong>Deadline:</strong> ${task.deadline_days} days</p>
+            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+            <p style="color: #94a3b8; font-size: 12px;">OpenClaw Hiring Team</p>
           </div>
-          <p style="color: #475569;">📎 Please find the complete task details in the attached PDF.</p>
-          <p style="color: #475569;"><strong>Deadline:</strong> ${task.deadline_days} days</p>
-          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
-          <p style="color: #94a3b8; font-size: 12px;">OpenClaw Hiring Team</p>
-        </div>
-      `;
-      sendSmtpEmail.sender = { name: 'OpenClaw Hiring', email: process.env.BREVO_SENDER_EMAIL || process.env.GMAIL_USER };
-      sendSmtpEmail.to = [{ email: profile.email, name: profile.name }];
+        `,
+        attachments: []
+      };
 
       // Attach PDF
       if (pdfBuffer) {
-        sendSmtpEmail.attachment = [{
-          name: `task-${(profile.name || 'candidate').replace(/\s+/g, '-').toLowerCase()}.pdf`,
-          content: pdfBuffer.toString('base64'),
-        }];
+        mailOptions.attachments.push({
+          filename: `task-${(profile.name || 'candidate').replace(/\s+/g, '-').toLowerCase()}.pdf`,
+          content: pdfBuffer,
+          contentType: 'application/pdf'
+        });
       }
 
       // Attach resume if uploaded
       if (profile.resumeBuffer) {
-        if (!sendSmtpEmail.attachment) sendSmtpEmail.attachment = [];
-        sendSmtpEmail.attachment.push({
-          name: profile.resumeFilename || 'resume.pdf',
-          content: profile.resumeBuffer.toString('base64'),
+        mailOptions.attachments.push({
+          filename: profile.resumeFilename || 'resume.pdf',
+          content: profile.resumeBuffer,
+          contentType: 'application/pdf'
         });
         console.log("📎 Resume attached:", profile.resumeFilename);
       }
 
-      const emailPromise = brevoClient.sendTransacEmail(sendSmtpEmail);
+      const emailPromise = transporter.sendMail(mailOptions);
       const emailTimeout = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Email timeout after 25s")), 25000)
       );
       await Promise.race([emailPromise, emailTimeout]);
-      console.log("✅ Email sent via Brevo to:", profile.email);
+      console.log("✅ Email sent to:", profile.email);
     } catch (emailErr) {
       console.error("❌ Email send failed:", emailErr.message);
       task._emailError = emailErr.message;
