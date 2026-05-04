@@ -1,26 +1,14 @@
 require('dotenv').config();
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const PDFDocument = require('pdfkit');
 
 // Gemini setup
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-// Email setup
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // STARTTLS — port 465 is blocked on Render free tier
-  family: 4,
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: (process.env.GMAIL_APP_PASSWORD || '').replace(/\s/g, '')
-  },
-  tls: {
-    rejectUnauthorized: false
-  }
-});
+// Resend email setup (HTTP API — works on Render free tier, no SMTP needed)
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Generate PDF buffer from task
 function generatePDF(task, profile) {
@@ -376,10 +364,27 @@ async function processCandidate(profile) {
       // Continue without PDF — email will be sent without attachment
     }
 
-    // Send email with PDF attachment
+    // Send email with PDF attachment via Resend (HTTP API — no SMTP needed)
     try {
-      const mailOptions = {
-        from: `"OpenClaw Hiring" <${process.env.GMAIL_USER}>`,
+      const attachments = [];
+
+      if (pdfBuffer) {
+        attachments.push({
+          filename: `task-${(profile.name || 'candidate').replace(/\s+/g, '-').toLowerCase()}.pdf`,
+          content: pdfBuffer.toString('base64'),
+        });
+      }
+
+      if (profile.resumeBuffer) {
+        attachments.push({
+          filename: profile.resumeFilename || 'resume.pdf',
+          content: profile.resumeBuffer.toString('base64'),
+        });
+        console.log("📎 Resume attached:", profile.resumeFilename);
+      }
+
+      const emailPromise = resend.emails.send({
+        from: 'OpenClaw Hiring <onboarding@resend.dev>',
         to: profile.email,
         subject: `Your Assignment Task — ${task.title}`,
         html: `
@@ -396,36 +401,22 @@ async function processCandidate(profile) {
             <p style="color: #94a3b8; font-size: 12px;">OpenClaw Hiring Team</p>
           </div>
         `,
-        attachments: pdfBuffer ? [
-          {
-            filename: `task-${(profile.name || 'candidate').replace(/\s+/g, '-').toLowerCase()}.pdf`,
-            content: pdfBuffer,
-            contentType: 'application/pdf'
-          }
-        ] : []
-      };
+        attachments,
+      });
 
-      // Attach candidate's resume if uploaded
-      if (profile.resumeBuffer) {
-        mailOptions.attachments.push({
-          filename: profile.resumeFilename || 'resume.pdf',
-          content: profile.resumeBuffer,
-          contentType: 'application/pdf'
-        });
-        console.log("📎 Resume attached:", profile.resumeFilename);
-      }
-
-      // 15 second timeout on email send
-      const emailPromise = transporter.sendMail(mailOptions);
       const emailTimeout = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Email timeout after 25s")), 25000)
       );
-      await Promise.race([emailPromise, emailTimeout]);
-      console.log("✅ Email sent with PDF to:", profile.email);
+      const emailResult = await Promise.race([emailPromise, emailTimeout]);
+
+      if (emailResult.error) {
+        throw new Error(emailResult.error.message || JSON.stringify(emailResult.error));
+      }
+
+      console.log("✅ Email sent via Resend to:", profile.email);
     } catch (emailErr) {
-      // Email failed but task was generated — don't crash the whole request
       console.error("❌ Email send failed:", emailErr.message);
-      task._emailError = emailErr.message; // attach for debugging
+      task._emailError = emailErr.message;
     }
 
     return task;
