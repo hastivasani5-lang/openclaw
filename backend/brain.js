@@ -422,6 +422,7 @@ async function processCandidate(profile) {
     } catch (emailErr) {
       // Email failed but task was generated — don't crash the whole request
       console.error("❌ Email send failed:", emailErr.message);
+      task._emailError = emailErr.message; // attach for debugging
     }
 
     return task;

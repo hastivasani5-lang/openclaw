@@ -165,7 +165,11 @@ app.post('/api/apply', async (req, res) => {
 
     clearTimeout(requestTimeout);
     if (!res.headersSent) {
-      res.json({ success: true, task: result.title || "Task generated" });
+      res.json({ 
+        success: true, 
+        task: result.title || "Task generated",
+        emailError: result._emailError || null
+      });
     }
 
   } catch (err) {
