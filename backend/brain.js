@@ -317,7 +317,22 @@ Return ONLY this JSON (no extra text):
     );
     const result = await Promise.race([geminiPromise, timeoutPromise]);
 
-    let text = result.response.text();
+    // Guard against malformed Gemini response object
+    if (!result || !result.response) {
+      throw new Error("Gemini returned empty response object");
+    }
+
+    let text;
+    try {
+      text = result.response.text();
+    } catch (textErr) {
+      throw new Error(`Gemini response.text() failed: ${textErr.message}`);
+    }
+
+    if (!text || typeof text !== 'string') {
+      throw new Error("Gemini returned empty text");
+    }
+
     // Strip any markdown code fences
     text = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
     // Extract JSON if there's extra text around it
@@ -373,7 +388,7 @@ async function processCandidate(profile) {
         `,
         attachments: [
           {
-            filename: `task-${profile.name.replace(/\s+/g, '-').toLowerCase()}.pdf`,
+          filename: `task-${(profile.name || 'candidate').replace(/\s+/g, '-').toLowerCase()}.pdf`,
             content: pdfBuffer,
             contentType: 'application/pdf'
           }
